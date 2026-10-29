@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Dynamic Schema JSON-LD Loader
- * Plugin URI:  https://example.com/dynamic-schema-json-ld
- * Description: A lightweight, self-contained WordPress plugin that dynamically outputs Schema.org JSON-LD structured data inside <head>.
- * Version:     1.0.0
+ * Plugin Name: Dynamic Schema JSON-LD Loader Pro
+ * Plugin URI:  https://example.com/dynamic-schema-json-ld-pro
+ * Description: A lightweight, high-performance, self-contained WordPress plugin that dynamically outputs valid Schema.org JSON-LD structured data inside <head>.
+ * Version:     1.1.0
  * Author:      Technical SEO Engineer
  * Author URI:  https://example.com
  * License:     GPL-2.0+
@@ -15,10 +15,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit; // Exit if accessed directly.
 }
 
+// Plugin Constants
+if ( ! defined( 'DYNAMIC_SCHEMA_JSON_LD_VERSION' ) ) {
+	define( 'DYNAMIC_SCHEMA_JSON_LD_VERSION', '1.1.0' );
+}
+
+if ( ! defined( 'DYNAMIC_SCHEMA_JSON_LD_PATH' ) ) {
+	define( 'DYNAMIC_SCHEMA_JSON_LD_PATH', plugin_dir_path( __FILE__ ) );
+}
+
 if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 
 	/**
 	 * Main Dynamic Schema JSON-LD Plugin Class
+	 *
+	 * Handles dynamic compilation, routing, conflict detection, and secure rendering
+	 * of Schema.org JSON-LD graph payloads.
+	 *
+	 * @package Dynamic_Schema_JSON_LD
+	 * @version 1.1.0
 	 */
 	class Dynamic_Schema_JSON_LD {
 
@@ -28,6 +43,13 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		 * @var Dynamic_Schema_JSON_LD|null
 		 */
 		private static $instance = null;
+
+		/**
+		 * Runtime memoized schema cache
+		 *
+		 * @var array|null
+		 */
+		private $cached_schema = null;
 
 		/**
 		 * Get singleton instance
@@ -42,10 +64,24 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		}
 
 		/**
-		 * Constructor
+		 * Private Constructor to enforce singleton pattern.
 		 */
 		private function __construct() {
 			add_action( 'wp_head', array( $this, 'output_schema' ), 20 );
+			add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $this, 'add_action_links' ) );
+		}
+
+		/**
+		 * Add action links on the plugin listing page.
+		 *
+		 * @param array $links Existing plugin action links.
+		 * @return array Modified plugin action links.
+		 */
+		public function add_action_links( $links ) {
+			$custom_links = array(
+				'<a href="https://schema.org" target="_blank" rel="noopener noreferrer">' . __( 'Schema Documentation', 'dynamic-schema-json-ld' ) . '</a>',
+			);
+			return array_merge( $custom_links, $links );
 		}
 
 		/**
@@ -77,7 +113,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		}
 
 		/**
-		 * Determine whether schema output is enabled.
+		 * Determine whether dynamic schema output is enabled.
 		 *
 		 * @return bool
 		 */
@@ -332,7 +368,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		/**
 		 * Build Article / BlogPosting schema object.
 		 *
-		 * @param WP_Post|int|null $post
+		 * @param WP_Post|int|null $post Post object or ID.
 		 * @return array
 		 */
 		public function build_article_schema( $post = null ) {
@@ -575,11 +611,16 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		}
 
 		/**
-		 * Route and compile schema payload based on query context.
+		 * Route and compile schema payload based on query context with memoization.
 		 *
-		 * @return array Schema graph payload
+		 * @param bool $force_recompile Whether to bypass internal cache.
+		 * @return array Schema graph payload.
 		 */
-		public function compile_schema() {
+		public function compile_schema( $force_recompile = false ) {
+			if ( null !== $this->cached_schema && ! $force_recompile ) {
+				return $this->cached_schema;
+			}
+
 			$graph = array();
 
 			// Always include WebPage and BreadcrumbList
@@ -626,7 +667,9 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				'@graph'   => $graph,
 			);
 
-			return apply_filters( 'dynamic_schema_compiled_payload', $schema_data );
+			$this->cached_schema = apply_filters( 'dynamic_schema_compiled_payload', $schema_data );
+
+			return $this->cached_schema;
 		}
 
 		/**
@@ -656,6 +699,15 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 			echo $json . "\n";
 			echo '</script>' . "\n";
 		}
+	}
+
+	/**
+	 * Public Helper / API function to retrieve current compiled schema payload programmatically.
+	 *
+	 * @return array
+	 */
+	function dynamic_schema_get_payload() {
+		return Dynamic_Schema_JSON_LD::get_instance()->compile_schema();
 	}
 
 	/**

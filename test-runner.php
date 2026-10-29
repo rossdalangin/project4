@@ -1,6 +1,6 @@
 <?php
 /**
- * Test Runner / Stubs for Dynamic Schema JSON-LD Loader with Security Edge Cases
+ * Comprehensive Test Runner for Dynamic Schema JSON-LD Loader
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -81,9 +81,31 @@ if ( ! function_exists( 'add_action' ) ) {
 	function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
 }
 
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
+}
+
 if ( ! function_exists( 'apply_filters' ) ) {
 	function apply_filters( $hook, $value, ...$args ) {
 		return $value;
+	}
+}
+
+if ( ! function_exists( 'plugin_basename' ) ) {
+	function plugin_basename( $file ) {
+		return basename( $file );
+	}
+}
+
+if ( ! function_exists( 'plugin_dir_path' ) ) {
+	function plugin_dir_path( $file ) {
+		return dirname( $file ) . '/';
+	}
+}
+
+if ( ! function_exists( '__' ) ) {
+	function __( $text, $domain = 'default' ) {
+		return $text;
 	}
 }
 
@@ -346,12 +368,34 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 // Load plugin code
 require_once __DIR__ . '/dynamic-schema-ld-json.php';
 
-echo "--- RUNNING DYNAMIC SCHEMA SECURITY TESTS ---\n";
+echo "--- RUNNING DYNAMIC SCHEMA PRO SUITE ---\n";
 
 $plugin = Dynamic_Schema_JSON_LD::get_instance();
 
-// TEST 1: Security & Escaping Check on Single Post
-echo "\n[Test 1] Security & Escaping Check on Single Post:\n";
+// TEST 1: Public API function dynamic_schema_get_payload()
+echo "\n[Test 1] Public API Function Test:\n";
+$GLOBALS['test_context'] = array(
+	'is_front_page' => true,
+	'is_home'       => true,
+	'is_single'     => false,
+	'is_singular'   => false,
+	'is_author'     => false,
+	'is_archive'    => false,
+	'is_category'   => false,
+	'is_tag'        => false,
+	'is_tax'        => false,
+	'queried_object' => null,
+);
+
+$payload = dynamic_schema_get_payload();
+if ( empty( $payload['@graph'] ) || count( $payload['@graph'] ) < 2 ) {
+	echo "FAIL: Public API dynamic_schema_get_payload() failed to return graph\n";
+	exit(1);
+}
+echo "PASS: Public API dynamic_schema_get_payload() verified.\n";
+
+// TEST 2: Security & Escaping Check on Single Post
+echo "\n[Test 2] Security & Escaping Check on Single Post:\n";
 $GLOBALS['test_context'] = array(
 	'is_front_page' => false,
 	'is_home'       => false,
@@ -370,20 +414,17 @@ $plugin->output_schema();
 $output1 = ob_get_clean();
 echo $output1;
 
-// 1. Verify unescaped </script> tag does NOT appear inside the json payload (between opening and closing script tags)
 $inner_json = preg_replace( '#^<script type="application/ld\+json">\n?|\n?</script>\n?$#', '', trim( $output1 ) );
 if ( strpos( $inner_json, '</script>' ) !== false ) {
 	echo "FAIL: Unescaped </script> found inside JSON-LD payload!\n";
 	exit(1);
 }
 
-// 2. Verify javascript: URL was stripped out by esc_url_raw / sanitize_url
 if ( strpos( $output1, 'javascript:' ) !== false ) {
 	echo "FAIL: Unsanitized javascript: URL found in payload!\n";
 	exit(1);
 }
 
-// 3. Verify HTML tags were stripped from display_name and job_title
 if ( strpos( $output1, '<script>' ) !== false || strpos( $output1, '<b onmouseover' ) !== false ) {
 	echo "FAIL: Unstripped HTML tags found in text fields!\n";
 	exit(1);
@@ -391,4 +432,4 @@ if ( strpos( $output1, '<script>' ) !== false || strpos( $output1, '<b onmouseov
 
 echo "PASS: Security & Escaping verified.\n";
 
-echo "\n--- ALL SECURITY TESTS PASSED! ---\n";
+echo "\n--- ALL PRO TESTS PASSED SUCCESSFULLY! ---\n";
