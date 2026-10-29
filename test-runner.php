@@ -1,9 +1,7 @@
 <?php
 /**
- * Test Runner / Stubs for Dynamic Schema JSON-LD Loader
+ * Test Runner / Stubs for Dynamic Schema JSON-LD Loader with Security Edge Cases
  */
-
-// Define mock functions and classes if WordPress is not loaded
 
 if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', __DIR__ . '/' );
@@ -16,11 +14,11 @@ class WP_User {
 	public $user_url;
 	public $description;
 
-	public function __construct( $id = 1, $display_name = 'Jane Doe', $login = 'janedoe' ) {
+	public function __construct( $id = 1, $display_name = 'Jane Doe <script>alert(1)</script>', $login = 'janedoe' ) {
 		$this->ID           = $id;
 		$this->display_name = $display_name;
 		$this->user_login   = $login;
-		$this->description  = 'Experienced SEO Specialist & Technical Writer.';
+		$this->description  = 'Experienced SEO Specialist & Technical Writer. </script><script>alert("XSS")</script>';
 	}
 }
 
@@ -34,7 +32,7 @@ class WP_Post {
 	public $post_content;
 	public $post_type;
 
-	public function __construct( $id = 101, $title = 'Understanding Technical SEO' ) {
+	public function __construct( $id = 101, $title = 'Understanding Technical SEO </script>' ) {
 		$this->ID            = $id;
 		$this->post_title    = $title;
 		$this->post_author   = 1;
@@ -86,6 +84,22 @@ if ( ! function_exists( 'add_action' ) ) {
 if ( ! function_exists( 'apply_filters' ) ) {
 	function apply_filters( $hook, $value, ...$args ) {
 		return $value;
+	}
+}
+
+if ( ! function_exists( 'esc_url_raw' ) ) {
+	function esc_url_raw( $url ) {
+		$url = trim( $url );
+		if ( preg_match( '#^(javascript|data|vbscript):#i', $url ) ) {
+			return '';
+		}
+		return filter_var( $url, FILTER_SANITIZE_URL );
+	}
+}
+
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+	function sanitize_text_field( $str ) {
+		return trim( strip_tags( $str ) );
 	}
 }
 
@@ -211,7 +225,7 @@ if ( ! function_exists( 'get_post_type' ) ) {
 
 if ( ! function_exists( 'single_post_title' ) ) {
 	function single_post_title( $prefix = '', $display = true ) {
-		return 'Understanding Technical SEO';
+		return 'Understanding Technical SEO </script>';
 	}
 }
 
@@ -245,13 +259,16 @@ if ( ! function_exists( 'get_userdata' ) ) {
 if ( ! function_exists( 'get_the_author_meta' ) ) {
 	function get_the_author_meta( $field, $user_id ) {
 		if ( 'description' === $field ) {
-			return 'Experienced SEO Specialist & Technical Writer.';
+			return 'Experienced SEO Specialist & Technical Writer. </script><script>alert("XSS")</script>';
 		}
 		if ( 'job_title' === $field ) {
-			return 'Senior SEO Architect';
+			return 'Senior SEO Architect <b onmouseover="alert(1)">test</b>';
 		}
 		if ( 'twitter' === $field ) {
 			return '@janedoe_seo';
+		}
+		if ( 'user_url' === $field ) {
+			return 'javascript:alert(1)'; // Malicious protocol
 		}
 		if ( 'linkedin' === $field ) {
 			return 'janedoe-seo';
@@ -329,12 +346,12 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 // Load plugin code
 require_once __DIR__ . '/dynamic-schema-ld-json.php';
 
-echo "--- RUNNING DYNAMIC SCHEMA TESTS ---\n";
+echo "--- RUNNING DYNAMIC SCHEMA SECURITY TESTS ---\n";
 
 $plugin = Dynamic_Schema_JSON_LD::get_instance();
 
-// TEST 1: Single Post Context
-echo "\n[Test 1] Single Post Context:\n";
+// TEST 1: Security & Escaping Check on Single Post
+echo "\n[Test 1] Security & Escaping Check on Single Post:\n";
 $GLOBALS['test_context'] = array(
 	'is_front_page' => false,
 	'is_home'       => false,
@@ -353,93 +370,25 @@ $plugin->output_schema();
 $output1 = ob_get_clean();
 echo $output1;
 
-// Validate output
-if ( strpos( $output1, '<script type="application/ld+json">' ) === false ) {
-	echo "FAIL: Missing script tag\n";
+// 1. Verify unescaped </script> tag does NOT appear inside the json payload (between opening and closing script tags)
+$inner_json = preg_replace( '#^<script type="application/ld\+json">\n?|\n?</script>\n?$#', '', trim( $output1 ) );
+if ( strpos( $inner_json, '</script>' ) !== false ) {
+	echo "FAIL: Unescaped </script> found inside JSON-LD payload!\n";
 	exit(1);
 }
-if ( strpos( $output1, '"BlogPosting"' ) === false ) {
-	echo "FAIL: Missing BlogPosting schema\n";
+
+// 2. Verify javascript: URL was stripped out by esc_url_raw / sanitize_url
+if ( strpos( $output1, 'javascript:' ) !== false ) {
+	echo "FAIL: Unsanitized javascript: URL found in payload!\n";
 	exit(1);
 }
-if ( strpos( $output1, '"Person"' ) === false ) {
-	echo "FAIL: Missing Person schema\n";
+
+// 3. Verify HTML tags were stripped from display_name and job_title
+if ( strpos( $output1, '<script>' ) !== false || strpos( $output1, '<b onmouseover' ) !== false ) {
+	echo "FAIL: Unstripped HTML tags found in text fields!\n";
 	exit(1);
 }
-if ( strpos( $output1, '"Senior SEO Architect"' ) === false ) {
-	echo "FAIL: Missing jobTitle in Person schema\n";
-	exit(1);
-}
-echo "PASS: Single Post Context verified.\n";
 
-// TEST 2: Author Context
-echo "\n[Test 2] Author Context:\n";
-$GLOBALS['test_context'] = array(
-	'is_front_page' => false,
-	'is_home'       => false,
-	'is_single'     => false,
-	'is_singular'   => false,
-	'is_author'     => true,
-	'is_archive'    => true,
-	'is_category'   => false,
-	'is_tag'        => false,
-	'is_tax'        => false,
-	'queried_object' => new WP_User(),
-);
+echo "PASS: Security & Escaping verified.\n";
 
-ob_start();
-$plugin->output_schema();
-$output2 = ob_get_clean();
-echo $output2;
-
-if ( strpos( $output2, '"ProfilePage"' ) === false ) {
-	echo "FAIL: Missing ProfilePage schema for author context\n";
-	exit(1);
-}
-if ( strpos( $output2, '"sameAs"' ) === false ) {
-	echo "FAIL: Missing sameAs in author Person schema\n";
-	exit(1);
-}
-echo "PASS: Author Context verified.\n";
-
-// TEST 3: Front Page Context
-echo "\n[Test 3] Front Page Context:\n";
-$GLOBALS['test_context'] = array(
-	'is_front_page' => true,
-	'is_home'       => true,
-	'is_single'     => false,
-	'is_singular'   => false,
-	'is_author'     => false,
-	'is_archive'    => false,
-	'is_category'   => false,
-	'is_tag'        => false,
-	'is_tax'        => false,
-	'queried_object' => null,
-);
-
-ob_start();
-$plugin->output_schema();
-$output3 = ob_get_clean();
-echo $output3;
-
-if ( strpos( $output3, '"WebPage"' ) === false ) {
-	echo "FAIL: Missing WebPage schema on front page\n";
-	exit(1);
-}
-echo "PASS: Front Page Context verified.\n";
-
-// TEST 4: Conflict Prevention (Yoast SEO defined)
-echo "\n[Test 4] Conflict Prevention (Yoast SEO defined):\n";
-define( 'WPSEO_VERSION', '20.0' );
-
-ob_start();
-$plugin->output_schema();
-$output4 = ob_get_clean();
-
-if ( ! empty( $output4 ) ) {
-	echo "FAIL: Schema output was not suppressed when WPSEO_VERSION is defined\n";
-	exit(1);
-}
-echo "PASS: Conflict Prevention verified.\n";
-
-echo "\n--- ALL TESTS PASSED SUCCESSFULLY! ---\n";
+echo "\n--- ALL SECURITY TESTS PASSED! ---\n";

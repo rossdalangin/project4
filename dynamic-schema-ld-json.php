@@ -93,6 +93,32 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		}
 
 		/**
+		 * Safely escape and validate URL for JSON-LD output.
+		 *
+		 * @param string $url
+		 * @return string
+		 */
+		public function sanitize_url( $url ) {
+			if ( empty( $url ) || ! is_string( $url ) ) {
+				return '';
+			}
+			return esc_url_raw( trim( $url ) );
+		}
+
+		/**
+		 * Safely sanitize text fields for JSON-LD output.
+		 *
+		 * @param string $text
+		 * @return string
+		 */
+		public function sanitize_text( $text ) {
+			if ( empty( $text ) || ! is_string( $text ) ) {
+				return '';
+			}
+			return sanitize_text_field( wp_strip_all_tags( $text ) );
+		}
+
+		/**
 		 * Get canonical URL for current context.
 		 *
 		 * @return string
@@ -128,6 +154,8 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				$url = home_url( '/' );
 			}
 
+			$url = $this->sanitize_url( $url );
+
 			return apply_filters( 'dynamic_schema_canonical_url', $url );
 		}
 
@@ -152,7 +180,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				$title = get_bloginfo( 'name' );
 			}
 
-			return apply_filters( 'dynamic_schema_page_title', wp_strip_all_tags( $title ) );
+			return apply_filters( 'dynamic_schema_page_title', $this->sanitize_text( $title ) );
 		}
 
 		/**
@@ -190,7 +218,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				$description = get_bloginfo( 'description' );
 			}
 
-			return apply_filters( 'dynamic_schema_page_description', wp_strip_all_tags( $description ) );
+			return apply_filters( 'dynamic_schema_page_description', $this->sanitize_text( $description ) );
 		}
 
 		/**
@@ -210,7 +238,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 
 			$user_id      = $user->ID;
 			$display_name = $user->display_name ? $user->display_name : $user->user_login;
-			$author_url   = get_author_posts_url( $user_id );
+			$author_url   = $this->sanitize_url( get_author_posts_url( $user_id ) );
 			$bio          = get_the_author_meta( 'description', $user_id );
 
 			// Job Title - check user meta fields
@@ -227,23 +255,32 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 
 			$user_url = get_the_author_meta( 'user_url', $user_id );
 			if ( ! empty( $user_url ) ) {
-				$same_as[] = $user_url;
+				$clean_url = $this->sanitize_url( $user_url );
+				if ( ! empty( $clean_url ) ) {
+					$same_as[] = $clean_url;
+				}
 			}
 
 			$social_fields = array( 'facebook', 'twitter', 'linkedin', 'instagram', 'github', 'youtube' );
 			foreach ( $social_fields as $field ) {
 				$val = get_the_author_meta( $field, $user_id );
 				if ( ! empty( $val ) ) {
+					$constructed_url = '';
 					if ( filter_var( $val, FILTER_VALIDATE_URL ) ) {
-						$same_as[] = $val;
+						$constructed_url = $val;
 					} elseif ( 'twitter' === $field ) {
-						$same_as[] = 'https://twitter.com/' . ltrim( $val, '@' );
+						$constructed_url = 'https://twitter.com/' . ltrim( $val, '@' );
 					} elseif ( 'facebook' === $field ) {
-						$same_as[] = 'https://facebook.com/' . $val;
+						$constructed_url = 'https://facebook.com/' . $val;
 					} elseif ( 'linkedin' === $field ) {
-						$same_as[] = 'https://linkedin.com/in/' . $val;
+						$constructed_url = 'https://linkedin.com/in/' . $val;
 					} elseif ( 'instagram' === $field ) {
-						$same_as[] = 'https://instagram.com/' . ltrim( $val, '@' );
+						$constructed_url = 'https://instagram.com/' . ltrim( $val, '@' );
+					}
+
+					$clean_social = $this->sanitize_url( $constructed_url );
+					if ( ! empty( $clean_social ) ) {
+						$same_as[] = $clean_social;
 					}
 				}
 			}
@@ -251,13 +288,18 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 			$meta_same_as = get_the_author_meta( 'same_as', $user_id );
 			if ( ! empty( $meta_same_as ) ) {
 				if ( is_array( $meta_same_as ) ) {
-					$same_as = array_merge( $same_as, $meta_same_as );
+					foreach ( $meta_same_as as $item ) {
+						$clean_item = $this->sanitize_url( $item );
+						if ( ! empty( $clean_item ) ) {
+							$same_as[] = $clean_item;
+						}
+					}
 				} else {
 					$lines = explode( "\n", str_replace( "\r", "", $meta_same_as ) );
 					foreach ( $lines as $line ) {
-						$line = trim( $line );
-						if ( filter_var( $line, FILTER_VALIDATE_URL ) ) {
-							$same_as[] = $line;
+						$clean_line = $this->sanitize_url( trim( $line ) );
+						if ( ! empty( $clean_line ) ) {
+							$same_as[] = $clean_line;
 						}
 					}
 				}
@@ -266,18 +308,18 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 			$same_as = array_values( array_unique( array_filter( $same_as ) ) );
 
 			$person_schema = array(
-				'@type'       => 'Person',
-				'@id'         => $author_url . '#person',
-				'name'        => wp_strip_all_tags( $display_name ),
-				'url'         => $author_url,
+				'@type' => 'Person',
+				'@id'   => $author_url . '#person',
+				'name'  => $this->sanitize_text( $display_name ),
+				'url'   => $author_url,
 			);
 
 			if ( ! empty( $bio ) ) {
-				$person_schema['description'] = wp_strip_all_tags( $bio );
+				$person_schema['description'] = $this->sanitize_text( $bio );
 			}
 
 			if ( ! empty( $job_title ) ) {
-				$person_schema['jobTitle'] = wp_strip_all_tags( $job_title );
+				$person_schema['jobTitle'] = $this->sanitize_text( $job_title );
 			}
 
 			if ( ! empty( $same_as ) ) {
@@ -314,22 +356,22 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 
 			$publisher_schema = array(
 				'@type' => 'Organization',
-				'@id'   => home_url( '/#organization' ),
-				'name'  => get_bloginfo( 'name' ),
-				'url'   => home_url( '/' ),
+				'@id'   => $this->sanitize_url( home_url( '/#organization' ) ),
+				'name'  => $this->sanitize_text( get_bloginfo( 'name' ) ),
+				'url'   => $this->sanitize_url( home_url( '/' ) ),
 			);
 
 			$article_type = apply_filters( 'dynamic_schema_article_type', 'BlogPosting', $post );
 
 			$article_schema = array(
-				'@type'            => $article_type,
+				'@type'            => $this->sanitize_text( $article_type ),
 				'@id'              => $canonical_url . '#article',
 				'isPartOf'         => array(
 					'@id' => $canonical_url,
 				),
-				'headline'         => wp_strip_all_tags( $headline ),
-				'datePublished'    => $pub_date,
-				'dateModified'     => $mod_date,
+				'headline'         => $this->sanitize_text( $headline ),
+				'datePublished'    => $this->sanitize_text( $pub_date ),
+				'dateModified'     => $this->sanitize_text( $mod_date ),
 				'mainEntityOfPage' => array(
 					'@type' => 'WebPage',
 					'@id'   => $canonical_url,
@@ -350,7 +392,10 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				$thumbnail_id  = get_post_thumbnail_id( $post );
 				$image_url     = wp_get_attachment_image_url( $thumbnail_id, 'full' );
 				if ( $image_url ) {
-					$article_schema['image'] = $image_url;
+					$clean_image = $this->sanitize_url( $image_url );
+					if ( ! empty( $clean_image ) ) {
+						$article_schema['image'] = $clean_image;
+					}
 				}
 			}
 
@@ -369,8 +414,8 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 			$items[] = array(
 				'@type'    => 'ListItem',
 				'position' => 1,
-				'name'     => get_bloginfo( 'name' ),
-				'item'     => home_url( '/' ),
+				'name'     => $this->sanitize_text( get_bloginfo( 'name' ) ),
+				'item'     => $this->sanitize_url( home_url( '/' ) ),
 			);
 
 			$position = 2;
@@ -393,8 +438,8 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 									$items[] = array(
 										'@type'    => 'ListItem',
 										'position' => $position++,
-										'name'     => $parent_term->name,
-										'item'     => get_term_link( $parent_term ),
+										'name'     => $this->sanitize_text( $parent_term->name ),
+										'item'     => $this->sanitize_url( get_term_link( $parent_term ) ),
 									);
 								}
 							}
@@ -402,15 +447,15 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 						$items[] = array(
 							'@type'    => 'ListItem',
 							'position' => $position++,
-							'name'     => $cat->name,
-							'item'     => get_term_link( $cat ),
+							'name'     => $this->sanitize_text( $cat->name ),
+							'item'     => $this->sanitize_url( get_term_link( $cat ) ),
 						);
 					}
 
 					$items[] = array(
 						'@type'    => 'ListItem',
 						'position' => $position++,
-						'name'     => single_post_title( '', false ) ?: $post->post_title,
+						'name'     => $this->sanitize_text( single_post_title( '', false ) ?: $post->post_title ),
 						'item'     => $this->get_canonical_url(),
 					);
 				}
@@ -424,15 +469,15 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 							$items[] = array(
 								'@type'    => 'ListItem',
 								'position' => $position++,
-								'name'     => get_the_title( $ancestor_id ),
-								'item'     => get_permalink( $ancestor_id ),
+								'name'     => $this->sanitize_text( get_the_title( $ancestor_id ) ),
+								'item'     => $this->sanitize_url( get_permalink( $ancestor_id ) ),
 							);
 						}
 					}
 					$items[] = array(
 						'@type'    => 'ListItem',
 						'position' => $position++,
-						'name'     => get_the_title( $post ),
+						'name'     => $this->sanitize_text( get_the_title( $post ) ),
 						'item'     => $this->get_canonical_url(),
 					);
 				}
@@ -449,8 +494,8 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 									$items[] = array(
 										'@type'    => 'ListItem',
 										'position' => $position++,
-										'name'     => $parent_term->name,
-										'item'     => get_term_link( $parent_term ),
+										'name'     => $this->sanitize_text( $parent_term->name ),
+										'item'     => $this->sanitize_url( get_term_link( $parent_term ) ),
 									);
 								}
 							}
@@ -459,7 +504,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 					$items[] = array(
 						'@type'    => 'ListItem',
 						'position' => $position++,
-						'name'     => $term->name,
+						'name'     => $this->sanitize_text( $term->name ),
 						'item'     => $this->get_canonical_url(),
 					);
 				}
@@ -469,7 +514,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 					$items[] = array(
 						'@type'    => 'ListItem',
 						'position' => $position++,
-						'name'     => $author->display_name,
+						'name'     => $this->sanitize_text( $author->display_name ),
 						'item'     => $this->get_canonical_url(),
 					);
 				}
@@ -477,7 +522,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				$items[] = array(
 					'@type'    => 'ListItem',
 					'position' => $position++,
-					'name'     => get_the_archive_title(),
+					'name'     => $this->sanitize_text( get_the_archive_title() ),
 					'item'     => $this->get_canonical_url(),
 				);
 			}
@@ -516,13 +561,13 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				'@type'       => $page_type,
 				'@id'         => $canonical_url,
 				'url'         => $canonical_url,
-				'name'        => wp_strip_all_tags( $title ),
-				'description' => wp_strip_all_tags( $description ),
+				'name'        => $title,
+				'description' => $description,
 				'isPartOf'    => array(
 					'@type' => 'WebSite',
-					'@id'   => home_url( '/#website' ),
-					'name'  => get_bloginfo( 'name' ),
-					'url'   => home_url( '/' ),
+					'@id'   => $this->sanitize_url( home_url( '/#website' ) ),
+					'name'  => $this->sanitize_text( get_bloginfo( 'name' ) ),
+					'url'   => $this->sanitize_url( home_url( '/' ) ),
 				),
 			);
 
@@ -571,7 +616,6 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 				if ( $author && $author instanceof WP_User ) {
 					$person = $this->build_person_schema( $author );
 					if ( ! empty( $person ) ) {
-						// Set mainEntity on ProfilePage or include Person
 						$graph[] = $person;
 					}
 				}
@@ -586,7 +630,7 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 		}
 
 		/**
-		 * Output JSON-LD schema into wp_head
+		 * Output JSON-LD schema into wp_head safely.
 		 */
 		public function output_schema() {
 			if ( ! $this->is_enabled() ) {
@@ -604,6 +648,9 @@ if ( ! class_exists( 'Dynamic_Schema_JSON_LD' ) ) {
 			if ( ! $json ) {
 				return;
 			}
+
+			// Prevent inline script tag closure XSS breakout attempts
+			$json = str_replace( '</script', '<\/script', $json );
 
 			echo '<script type="application/ld+json">' . "\n";
 			echo $json . "\n";
